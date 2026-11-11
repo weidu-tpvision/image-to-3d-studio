@@ -1,0 +1,36 @@
+# Python Virtual Environment & Caches
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+
+# Generated 3D assets, uploads, and weights
+outputs/
+*.ply
+*.stl
+*.obj
+*.splat
+*.glb
+*.gltf
+*.temp.*
+*.bin
+*.safetensors
+
+# External Submodule / Cloned SDK (installed via git/pip)
+idol-sdk/
+
+# Node / Web Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.next/
+.env
+.env.local
+.env.*.local
+
+# OS & Logs
+.DS_Store
+Thumbs.db
+*.log
