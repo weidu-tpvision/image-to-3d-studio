@@ -29,6 +29,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def add_cross_origin_isolation_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    response.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
+    response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+    return response
+
 OUTPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "outputs"))
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -97,7 +106,7 @@ async def generate_3d(
 
         # 1. Run 3D Gaussian Splat generation via Idol
         logger.info(f"Running Idol inference (mode={mode}, splats={num_gaussians})...")
-        pipeline_service.generate(
+        gen_info = pipeline_service.generate(
             image_path=input_path,
             ply_output_path=ply_path,
             mode=mode,
@@ -120,6 +129,8 @@ async def generate_3d(
         return {
             "job_id": job_id,
             "status": "success",
+            "generation_mode": gen_info.get("mode", "neural"),
+            "notice": gen_info.get("notice"),
             "ply_url": f"/api/v1/download/{job_id}.ply",
             "stl_url": f"/api/v1/download/{job_id}.stl" if stl_generated else None,
             "input_preview_url": f"/api/v1/download/{job_id}_input{ext}",

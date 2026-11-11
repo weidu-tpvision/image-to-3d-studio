@@ -8,7 +8,7 @@ export default function MeshViewer({ stlUrl }) {
   const containerRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [wireframe, setWireframe] = useState(false);
-  const [stats, setStats] = useState({ vertices: 0, triangles: 0 });
+  const [stats, setStats] = useState({ vertices: 0, triangles: 0, dimensionsMm: null });
   const materialRef = useRef(null);
 
   useEffect(() => {
@@ -69,11 +69,12 @@ export default function MeshViewer({ stlUrl }) {
 
     let currentMesh = null;
 
-    // 7. Load STL
+    // 7. Load STL (exported in Slicer Z-up coordinates; rotate -90 deg X for Three.js Y-up grid)
     const loader = new STLLoader();
     loader.load(
       stlUrl,
       (geometry) => {
+        geometry.rotateX(-Math.PI / 2);
         geometry.computeVertexNormals();
         geometry.center();
 
@@ -81,7 +82,7 @@ export default function MeshViewer({ stlUrl }) {
         mesh.castShadow = true;
         mesh.receiveShadow = true;
 
-        // Position on top of print bed
+        // Position resting flat on top of print bed (y = 0)
         const box = new THREE.Box3().setFromObject(mesh);
         const size = box.getSize(new THREE.Vector3());
         mesh.position.y = size.y / 2;
@@ -89,15 +90,16 @@ export default function MeshViewer({ stlUrl }) {
         scene.add(mesh);
         currentMesh = mesh;
 
-        // Update stats
+        // Update stats (Width X, Depth Z, Height Y in mm)
         const triCount = geometry.index ? geometry.index.count / 3 : geometry.attributes.position.count / 3;
         setStats({
           vertices: geometry.attributes.position.count,
           triangles: Math.round(triCount),
+          dimensionsMm: `${size.x.toFixed(1)} × ${size.z.toFixed(1)} × ${size.y.toFixed(1)} mm`,
         });
 
         // Adjust camera focus
-        camera.position.set(0, size.y * 1.5, size.z * 2.2);
+        camera.position.set(0, size.y * 1.4, Math.max(size.x, size.y, size.z) * 2.1);
         controls.target.set(0, size.y / 2, 0);
         controls.update();
 
@@ -177,13 +179,19 @@ export default function MeshViewer({ stlUrl }) {
 
       {/* Bottom Info HUD */}
       {!loading && stats.triangles > 0 && (
-        <div className="absolute bottom-3 left-3 bg-slate-900/80 backdrop-blur-md px-3.5 py-2 rounded-xl border border-slate-700/50 text-[11px] text-slate-300 flex items-center gap-4">
+        <div className="absolute bottom-3 left-3 bg-slate-900/80 backdrop-blur-md px-3.5 py-2 rounded-xl border border-slate-700/50 text-[11px] text-slate-300 flex flex-wrap items-center gap-3">
           <span className="flex items-center gap-1.5 font-mono text-cyan-400">
             <Box className="w-3.5 h-3.5" />
             {stats.triangles.toLocaleString()} Triangles
           </span>
+          {stats.dimensionsMm && (
+            <>
+              <span className="text-slate-500">|</span>
+              <span className="font-mono text-slate-200">{stats.dimensionsMm}</span>
+            </>
+          )}
           <span className="text-slate-500">|</span>
-          <span className="text-emerald-400 font-medium">Watertight / Slicer-Ready</span>
+          <span className="text-emerald-400 font-medium">Watertight / Slicer-Ready (Z-Up)</span>
         </div>
       )}
     </div>

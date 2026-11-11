@@ -17,6 +17,9 @@ export default function SplatViewer({ plyUrl }) {
     setError(null);
 
     try {
+      const canUseSharedMemory =
+        typeof SharedArrayBuffer !== 'undefined' && Boolean(window.crossOriginIsolated);
+
       viewer = new GaussianSplats3D.Viewer({
         rootElement: containerRef.current,
         cameraUp: [0, -1, 0],
@@ -25,6 +28,8 @@ export default function SplatViewer({ plyUrl }) {
         sphericalHarmonicsDegree: 0,
         selfDrivenMode: true,
         useBuiltInControls: true,
+        sharedMemoryForWorkers: canUseSharedMemory,
+        gpuAcceleratedSort: canUseSharedMemory,
       });
       viewerRef.current = viewer;
 

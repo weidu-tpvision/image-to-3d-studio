@@ -363,6 +363,13 @@ export default function App() {
                 <span>{error}</span>
               </div>
             )}
+
+            {result?.notice && (
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+                <span>{result.notice}</span>
+              </div>
+            )}
           </div>
         </div>
 
