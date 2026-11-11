@@ -21,6 +21,7 @@ export default function App() {
   // Input & Settings State
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
+  const [engine, setEngine] = useState('hunyuan'); // 'hunyuan' | 'idol' | 'dual'
   const [mode, setMode] = useState('real');
   const [numGaussians, setNumGaussians] = useState(262144);
   const [exportStl, setExportStl] = useState(true);
@@ -87,6 +88,7 @@ export default function App() {
 
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('engine', engine);
     formData.append('mode', mode);
     formData.append('num_gaussians', numGaussians.toString());
     formData.append('export_stl', exportStl.toString());
@@ -105,7 +107,7 @@ export default function App() {
 
       const data = await response.json();
       setResult(data);
-      setViewTab('splat');
+      setViewTab(engine === 'hunyuan' && data.stl_url ? 'stl' : 'splat');
     } catch (err) {
       console.error('Generation failed:', err);
       setError(err.message || 'Failed to generate 3D model.');
@@ -244,6 +246,52 @@ export default function App() {
               <Cpu className="w-4 h-4 text-cyan-400" />
               2. Generation Settings
             </h2>
+
+            {/* 3D AI Engine Selector */}
+            <div>
+              <label className="text-xs font-medium text-slate-300 mb-1.5 block">3D Generation Engine</label>
+              <div className="grid grid-cols-1 gap-2">
+                {[
+                  {
+                    id: 'hunyuan',
+                    title: 'Hunyuan3D-2mini-Turbo (0.6B)',
+                    subtitle: 'Native SDF Watertight Mesh (~5.8 GB VRAM, 6-step FlashVDM, Ungated)',
+                    badge: 'Best for 3D Print & Mobile',
+                  },
+                  {
+                    id: 'idol',
+                    title: 'Sperid Idol 3DGS (0.66B)',
+                    subtitle: 'Photorealistic 3D Gaussian Splat (.ply) + Marching Cubes STL',
+                    badge: '3DGS Native',
+                  },
+                  {
+                    id: 'dual',
+                    title: 'Dual Engine (Idol 3DGS + Hunyuan SDF)',
+                    subtitle: 'Idol photorealistic Splat (.ply) + Hunyuan native SDF mesh (.stl)',
+                    badge: 'DGX Spark 128GB',
+                  },
+                ].map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setEngine(opt.id)}
+                    className={`px-3.5 py-2.5 rounded-xl text-xs border text-left transition-all flex items-center justify-between gap-2 ${
+                      engine === opt.id
+                        ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/40 shadow-sm shadow-cyan-500/10'
+                        : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <div>
+                      <div className="font-semibold text-slate-100">{opt.title}</div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">{opt.subtitle}</div>
+                    </div>
+                    <span className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-900 text-cyan-300 border border-slate-700">
+                      {opt.badge}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {/* Mode Selector */}
             <div>

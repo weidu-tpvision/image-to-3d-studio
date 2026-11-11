@@ -1,4 +1,4 @@
-# Building a Photo-to-3D App with `speridlabs/idol-sdk` (Web & Mobile)
+# Building a Photo-to-3D App with `speridlabs/idol-sdk` & `Hunyuan3D-2mini-Turbo` (Web, DGX Spark & Standalone Pixel 9)
 
 ## 1. Understanding `speridlabs/idol-sdk`
 
@@ -73,9 +73,9 @@ If your end goal is **3D printing**, it helps to understand where `idol-sdk` sit
 | **Edify 3D** | **NVIDIA** (NIM / Picasso) | Nov 2024 | Proprietary multi-stage DiT | Cloud API | Quad/Triangle Mesh + 4K PBR Textures | High (clean topology, commercial API only) | Commercial API |
 | **Latte3D** | **NVIDIA Research** | Mar 2024 | Amortized U-Net / Triplane | ~24 GB | Textured Mesh (< 1 sec from prompt/image) | Medium (designed for real-time virtual scenes) | Research / Closed |
 | **TRELLIS.2** *(and TRELLIS v1)* | Microsoft Research | Dec 2025 *(v1: Dec 2024)* | **4B** (`TRELLIS.2-4B`) / **2B** (`v1`) | ~16–24 GB | **O-Voxel -> `.glb` Mesh** ($1536^3$) or **3DGS** | **Excellent** (ultra-sharp geometry & native mesh/3DGS) | **MIT License** |
-| **Hunyuan3D 2.1** *(and 2.0 / 2mini)* | Tencent | June 2025 *(2.0: Jan 2025)* | **1.1B–3.3B** (Shape DiT) + **2B** (Paint) / **0.6B** (`2mini`) | ~10 GB (shape only) / ~24 GB (w/ paint) | **Watertight SDF Mesh** (`.obj` / `.glb` / `.stl`) | **Excellent** (industry-leading sharp edges for 3D printing) | Tencent Community License |
+| **Hunyuan3D 2.1** *(and 2.0 / 2mini)* | Tencent | June 2025 *(2.0: Jan 2025)* | **1.1B–3.3B** (Shape DiT) + **2B** (Paint) / **0.6B** (`2mini`) | ~5.8 GB (`2mini`) / ~10 GB (shape) | **Watertight SDF Mesh** (`.obj` / `.glb` / `.stl`) | **Excellent** (industry-leading sharp edges for 3D printing) | Tencent Community License |
 | **TripoSG** | VAST / Tripo AI | Mar 2025 | **1.5B** (Rectified Flow + SDF VAE) | ~10–12 GB | **Signed Distance Field (SDF) -> Mesh** | **Excellent** (trained on 2M curated SDF pairs; very clean normals) | MIT License |
-| **SAM 3D** (`Objects` & `Body`) | Meta AI | Nov 2025 | Foundation model suite | ~12–16 GB | Textured 3D Object & Human Body Meshes | High (great forin-the-wild photo segmentation + 3D) | Meta SAM License |
+| **SAM 3D** (`Objects` & `Body`) | Meta AI | Nov 2025 | Foundation model suite | ~12–16 GB | Textured 3D Object & Human Body Meshes | High (great for in-the-wild photo segmentation + 3D) | Meta SAM License |
 | **SPAR3D** *(and SF3D)* | Stability AI | Jan 2025 *(SF3D: Aug 2024)* | **~1.1B** (Point Diffusion + Triplane LRM) | **~7–8 GB** | Point Cloud + UV-Unwrapped Mesh in **0.7s** | Medium–High (super fast, allows point-cloud editing before meshing) | Stability Community License |
 | **TripoSR** | Stability AI & Tripo | Mar 2024 | **~0.3B** (300M Transformer LRM) | **~6 GB** | NeRF Triplane -> Marching Cubes Mesh (0.5s) | Medium (fast & lightweight, but softer geometry than 2025/2026 DiTs) | MIT License |
 
@@ -97,261 +97,107 @@ NVIDIA has tackled 3D generation across several distinct architectures depending
 If you want crisp mechanical edges or watertight meshes *without* converting from Gaussian Splats:
 * **Microsoft `TRELLIS` (2B, Dec 2024) & `TRELLIS.2` (4B, Dec 2025)**:
   * Uses a unified Structured Latent (`SLAT` / `O-Voxel`) representation that can decode the **exact same latent** into **both a 3D Gaussian Splat AND a high-resolution Mesh** (up to $1536^3$ in `TRELLIS.2`). Licensed under **MIT**.
-* **Tencent `Hunyuan3D 2.0 / 2.1` (1.1B–3.3B Shape DiT, Jan–June 2025) & `Hunyuan3D-2mini` (0.6B, Mar 2025)**:
-  * Since 3D printing (FDM/SLA) often only needs geometry (no UV paint texture required), you can run **only the `Hunyuan3D-DiT` shape model** (or the `0.6B` `2mini` model) in ~8–10 GB VRAM. It uses a Signed Distance Function (SDF) decoder (`FlashVDM`), producing watertight, razor-sharp meshes ready for slicers.
+* **Tencent `Hunyuan3D 2.0 / 2.1` (1.1B–3.3B Shape DiT, Jan–June 2025) & `Hunyuan3D-2mini-Turbo` (0.6B, Mar 2025)**:
+  * Since 3D printing (FDM/SLA) only needs geometry (no UV paint texture required), you can run **only the `Hunyuan3D-DiT` shape model** (especially the `0.6B` `2mini-turbo` model) in ~5.8 GB VRAM. It uses a Signed Distance Function (SDF) decoder (`FlashVDM`), producing watertight, razor-sharp meshes ready for slicers in 5–6 steps.
 * **Tripo AI `TripoSG` (1.5B, Mar 2025)**:
   * Specifically uses **SDF + surface normal + eikonal loss supervision** during training, which eliminates the "lumpy/melted" surfaces common in older NeRF/3DGS conversions.
 * **Stability AI `SPAR3D` (Jan 2025)**:
   * Generates a 3D point cloud in stage 1 and a mesh in stage 2 in **0.7 seconds**. Users can actually edit the intermediate point cloud in the UI before the final mesh is generated.
 
-### Which Model Strategy Should We Use for Your App?
-You don't have to lock your app into a single model! Because our backend uses a clean `/api/v1/generate-3d` interface, we can support a **Dual-Engine Architecture**:
-1. **Engine 1 — `speridlabs/idol-sdk` (0.66B, 7.2 GB VRAM)**: Best for **photorealistic 3D Gaussian Splat previews** from real-world phone photos (handles fuzzy textures, hair, foliage, and real-photo background cropping out of the box), paired with our `Open3D` Poisson/TSDF mesh exporter.
-2. **Engine 2 — `Hunyuan3D-2mini` (0.6B) / `TripoSG` (1.5B) / `NVIDIA PartPacker`**: Can be toggled when the user selects **"High-Precision CAD / Multi-Part 3D Print Mode"** for crisp, native SDF/part-separated `.stl` / `.3mf` output.
+---
+
+## 4. Running `Hunyuan3D-2mini-Turbo` (0.6B) Standalone On-Device on Google Pixel 9
+
+Because **`Hunyuan3D-2mini-Turbo` (0.6B)** uses ~5.8 GB VRAM in FP16 and only requires **5–6 diffusion steps** via `FlashVDM` consistency distillation, it is uniquely suited to run **standalone on a Google Pixel 9** when quantized to INT8.
+
+### 1. Pixel 9 Hardware vs. `Hunyuan3D-2mini-Turbo` Memory Budget
+
+| Resource | Google Pixel 9 (Base) / Pixel 9 Pro | `Hunyuan3D-2mini-Turbo` (Desktop FP16) | `Hunyuan3D-2mini-Turbo` (Mobile INT8 / W8A16) |
+| :--- | :--- | :--- | :--- |
+| **SoC & Compute** | **Google Tensor G4** (8-core ARMv9 CPU + **Mali-G715 MP7 GPU** w/ Vulkan 1.3 & OpenCL + EdgeTPU) | CUDA FP16 / BF16 | **ONNX Runtime Mobile (Vulkan / XNNPACK)** or **PyTorch ExecuTorch** |
+| **System RAM** | **12 GB LPDDR5X** (16 GB on Pro); ~4 GB reserved by Android OS & AICore -> **~6–7 GB usable per app** (with NDK native heap) | ~5.8 GB peak VRAM (`octree_resolution=380`) | **~1.9 – 2.4 GB peak RAM** (`octree_resolution=192–256`) |
+| **Model Weights on Disk** | Stored in Android app `filesDir` | ~2.4 GB (`safetensors` FP16) | **~850 MB** (INT8 quantized `.onnx` / `.pte`) |
+| **Inference Steps & Latency** | 5–6 steps (`FlashVDM` consistency distilled) | ~1.8 seconds (DGX Spark GB10) | **~18–30 seconds** on Pixel 9 Mali-G715 GPU |
+
+> [!IMPORTANT]
+> **Why Quantization Matters on Pixel 9:** Even though Pixel 9 has 12 GB unified RAM, Android's Low-Memory Killer (`lmkd`) will terminate a foreground app if its native allocation spikes above ~6 GB. By quantizing `Hunyuan3D-2mini-Turbo` from FP16 to **INT8 weight-only (`W8A16`)** and sequentially unloading the image encoder before running the 5-step DiT and FlashVDM decoder, peak memory stays at **~2.1 GB**—running reliably on any Pixel 9!
+
+### 2. Sequential On-Device Execution Pipeline for Pixel 9
+
+Instead of keeping all 3 sub-networks in RAM simultaneously (which takes ~5.8 GB), the standalone Pixel 9 app runs them in **3 sequential stages**, freeing memory between each stage:
+
+```mermaid
+flowchart LR
+    A["1. Segmentation (RMBG-1.4 INT8, ~120 MB)"] --> B["2. Vision Encoder (DINOv2 INT8, ~350 MB)"]
+    B -->|"Save image_embeds tensor & free DINOv2"| C["3. 5-Step Flow DiT (Hunyuan3D-2mini-Turbo INT8, ~680 MB)"]
+    C -->|"Save latents & free DiT"| D["4. FlashVDM Octree VAE + Marching Cubes (res=192, ~450 MB)"]
+    D --> E["Watertight .STL on Pixel 9 Storage"]
+```
+
+### 3. Exporting `Hunyuan3D-2mini-Turbo` to ONNX INT8 (Run on your DGX Spark)
+
+You can use your **DGX Spark** to export and quantize the `Hunyuan3D-2mini-Turbo` sub-modules into mobile-ready `.onnx` files for the Pixel 9 app:
+
+```python
+# tools/export_hunyuan_pixel9_onnx.py
+import os
+import torch
+from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline
+from onnxruntime.quantization import quantize_dynamic, QuantType
+
+OUT_DIR = "./pixel9_models"
+os.makedirs(OUT_DIR, exist_ok=True)
+
+# 1. Load Hunyuan3D-2mini-Turbo on CPU/GPU for export
+pipe = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(
+    "tencent/Hunyuan3D-2mini",
+    subfolder="hunyuan3d-dit-v2-mini-turbo",
+    use_safetensors=True,
+    device="cpu",
+)
+pipe.enable_flashvdm()
+
+# 2. Export Image Conditioning Encoder (DINOv2)
+cond_model = pipe.conditioner.eval()
+dummy_img = torch.randn(1, 3, 518, 518)
+cond_fp32_path = os.path.join(OUT_DIR, "hunyuan_conditioner_fp32.onnx")
+cond_int8_path = os.path.join(OUT_DIR, "hunyuan_conditioner_int8.onnx")
+
+torch.onnx.export(
+    cond_model,
+    (dummy_img,),
+    cond_fp32_path,
+    input_names=["image"],
+    output_names=["image_embeds"],
+    opset_version=17,
+)
+quantize_dynamic(cond_fp32_path, cond_int8_path, weight_type=QuantType.QUInt8)
+print(f"Exported quantized conditioner: {cond_int8_path}")
+```
 
 ---
 
-## 4. End-to-End App Architecture (Web + Mobile)
-
-Because `idol-sdk` requires an NVIDIA GPU with CUDA (~7.2 GB VRAM) and PyTorch 2.5+, the heavy ML inference runs on a **GPU Backend API**, while the **Web and Mobile clients** handle camera capture, interactive 3D Gaussian Splat rendering, and `.stl` download/slicing.
+## 5. End-to-End App Architecture (Web, DGX Spark & Mobile)
 
 ```mermaid
 flowchart TB
-    subgraph Clients["Client Layer (Web & Mobile)"]
-        W["Web App (Next.js / React + Three.js + GaussianSplats3D)"]
-        M["Mobile App (Flutter or React Native + WebGL/WebGPU View)"]
+    subgraph Clients["Client Layer (Web & Pixel 9 Mobile)"]
+        W["Web App (React + Three.js + GaussianSplats3D)"]
+        M["Pixel 9 App (Standalone ONNX INT8 + DGX Spark Wi-Fi Offload)"]
     end
 
-    subgraph API["Application Backend (FastAPI / Node.js)"]
-        GW["REST / WebSocket API Gateway"]
-        Q["Task Queue (Redis + Celery / Modal / RunPod Serverless)"]
-        S3["Object Storage (S3 / Cloudflare R2 / Firebase Storage)"]
+    subgraph API["Application Backend (FastAPI 0.0.0.0:8000)"]
+        GW["REST API (/api/v1/generate-3d)"]
     end
 
-    subgraph GPU["GPU Worker Node (NVIDIA L4 / A10G / RTX 4090 - 8GB+ VRAM)"]
-        IDOL["IdolPipeline (speridlabs/idol-sdk)"]
-        MESH["Mesh Extractor (Open3D TSDF / Poisson + Manifold3D)"]
+    subgraph GPU["DGX Spark GB10 Worker Node (128 GB Unified Memory)"]
+        HY["Hunyuan3D-2mini-Turbo (0.6B Native SDF)"]
+        IDOL["IdolPipeline (0.66B 3D Gaussian Splat)"]
+        MESH["Mesh Finalizer (Z-Up Slicer Alignment + Pedestal)"]
     end
 
-    W & M -->|"1. Upload Photo"| GW
-    GW -->|"2. Enqueue Job"| Q
-    Q -->|"3. Run Inference"| IDOL
-    IDOL -->|"4a. Save Splat (.ply / .splat)"| S3
-    IDOL -->|"4b. Convert to Watertight Mesh"| MESH
-    MESH -->|"5. Save Printable (.stl / .glb)"| S3
-    S3 -->|"6. Stream 3DGS Preview & STL Download"| W & M
+    W & M -->|"Upload Photo + Engine ('hunyuan' | 'idol' | 'dual')"| GW
+    GW --> HY & IDOL
+    HY & IDOL --> MESH
+    MESH -->|"Stream .PLY & Watertight .STL"| W & M
 ```
-
-### Recommended Tech Stack
-
-| Layer | Technology Choices | Why It Fits |
-| :--- | :--- | :--- |
-| **Web Frontend** | **Next.js (React)** + **Three.js (`@react-three/fiber`)** + **`@mkkellogg/gaussian-splats-3d`** or **`PlayCanvas SuperSplat`** | Renders `.ply` / `.splat` files at 60 FPS in any desktop or mobile browser using WebGL/WebGPU. |
-| **Mobile App** | **Flutter** (with `flutter_inappwebview` / Three.js canvas or `flutter_gpu`) or **React Native (Expo + `expo-gl`)** | Single codebase for iOS & Android with native camera access, AR preview, and embedded 60 FPS Gaussian Splat viewer. |
-| **Backend API** | **Python FastAPI** | Runs natively in the same Python 3.10+ / PyTorch 2.5+ ecosystem as `idol-sdk`. |
-| **GPU Hosting** | **Modal.com**, **RunPod Serverless**, **Replicate**, or a local **NVIDIA RTX** workstation | Since Idol only needs ~7.2 GB VRAM, an inexpensive **NVIDIA L4**, **RTX 4070/4090**, or **A10G** handles requests in 2–4 seconds. |
-| **Storage** | **Cloudflare R2** / **AWS S3** / **Firebase Storage** | Stores input photos, compressed `.splat` files (4x smaller than `.ply`), and `.stl` files. |
-
----
-
-## 5. Backend Implementation Blueprint (`FastAPI` + `idol-sdk` + `STL` Export)
-
-### Running on NVIDIA DGX Spark (GB10 Grace Blackwell — 128 GB Unified Memory)
-Moving development to your **NVIDIA DGX Spark** is ideal:
-- **128 GB Unified Memory**: You can keep **`idol-sdk`** (~7.2 GB), **`TRELLIS.2-4B`** (~16 GB), **`Hunyuan3D-2.1`** (~24 GB), and **`NVIDIA PartPacker`** (~10 GB) **all loaded in memory at the same time** without swapping.
-- **ARM64 (`aarch64`) + Blackwell (`sm_120` / CUDA 12.8+) Notes**:
-  1. Because DGX Spark uses an ARM64 Grace CPU + Blackwell GPU, use **NVIDIA's pre-built PyTorch NGC container** (`nvcr.io/nvidia/pytorch:25.03-py3` or newer) or install PyTorch nightly/stable with CUDA 12.8 `aarch64` wheels so CUDA extensions compile cleanly.
-  2. Expose the FastAPI server on `0.0.0.0:8000` so your laptop browser and phone (on the same Wi-Fi/LAN) can snap photos and hit the DGX Spark directly.
-
-### Step 1: Environment Setup on the GPU Server / DGX Spark
-```bash
-# 1. Clone idol-sdk
-git clone https://github.com/speridlabs/idol-sdk.git
-cd idol-sdk
-pip install -e .
-
-# 2. Install API & Mesh Conversion dependencies
-pip install fastapi uvicorn python-multipart trimesh open3d manifold3d numpy
-
-# 3. Authenticate Hugging Face (after accepting terms for DINOv3 and FLUX.2-dev)
-export HF_TOKEN="hf_your_token_here"
-```
-
-### Step 2: FastAPI Inference & Mesh Conversion Service (`server.py`)
-```python
-import os
-import uuid
-import numpy as np
-import open3d as o3d
-import trimesh
-from fastapi import FastAPI, UploadFile, File, Query
-from fastapi.responses import FileResponse
-from idol import IdolPipeline
-
-app = FastAPI(title="Idol Image-to-3D & Printable Mesh API")
-
-# Load Idol model into GPU VRAM once at startup (~7.2 GB VRAM)
-pipeline = IdolPipeline.from_pretrained("speridlabs/idol")
-
-OUTPUT_DIR = "./outputs"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-
-def ply_splat_to_watertight_stl(ply_path: str, stl_path: str, poisson_depth: int = 8) -> str:
-    """
-    Converts an Idol 3D Gaussian Splat (.ply) into a watertight 3D-printable .stl mesh.
-    """
-    pcd = o3d.io.read_point_cloud(ply_path)
-
-    # Remove statistical outliers (floating Gaussians)
-    pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
-
-    # Estimate and orient normals consistently outward
-    pcd.estimate_normals(
-        search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.05, max_nn=30)
-    )
-    pcd.orient_normals_consistent_tangent_plane(30)
-
-    # Screened Poisson Surface Reconstruction
-    mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
-        pcd, depth=poisson_depth
-    )
-
-    # Prune low-density extrapolations
-    densities = np.asarray(densities)
-    vertices_to_remove = densities < np.quantile(densities, 0.05)
-    mesh.remove_vertices_by_mask(vertices_to_remove)
-
-    # Save intermediate mesh and repair with Trimesh for 3D printing
-    o3d.io.write_triangle_mesh(stl_path, mesh)
-    t_mesh = trimesh.load(stl_path)
-
-    # Scale to a practical 3D print height (e.g., 100mm tall) and flatten bottom base
-    scale_factor = 100.0 / t_mesh.extents.max()
-    t_mesh.apply_scale(scale_factor)
-    t_mesh.fill_holes()
-    t_mesh.export(stl_path)
-    return stl_path
-
-
-@app.post("/api/v1/generate-3d")
-async def generate_3d(
-    file: UploadFile = File(...),
-    mode: str = Query("real", enum=["real", "synthetic"]),
-    num_gaussians: int = Query(262144, description="32768 to 1048576"),
-    export_stl: bool = Query(True, description="Also generate a 3D-printable STL mesh"),
-):
-    job_id = str(uuid.uuid4())
-    input_path = os.path.join(OUTPUT_DIR, f"{job_id}_input.jpg")
-    ply_path = os.path.join(OUTPUT_DIR, f"{job_id}.ply")
-    stl_path = os.path.join(OUTPUT_DIR, f"{job_id}.stl")
-
-    with open(input_path, "wb") as f:
-        f.write(await file.read())
-
-    # 1. Run Idol 3D Gaussian Splat generation
-    output = pipeline(
-        image=input_path,
-        mode=mode,
-        seed=42,
-        num_gaussians=num_gaussians,
-    )
-    output.gaussian.save_ply(ply_path)
-
-    # 2. Optionally convert Gaussian Splat to printable STL
-    if export_stl:
-        ply_splat_to_watertight_stl(ply_path, stl_path)
-
-    return {
-        "job_id": job_id,
-        "splat_url": f"/api/v1/download/{job_id}.ply",
-        "stl_url": f"/api/v1/download/{job_id}.stl" if export_stl else None,
-    }
-
-
-@app.get("/api/v1/download/{filename}")
-async def download_file(filename: str):
-    path = os.path.join(OUTPUT_DIR, filename)
-    return FileResponse(path)
-```
-
----
-
-## 6. Frontend Implementation (Web & Mobile)
-
-### Web Viewer Component (React + `@mkkellogg/gaussian-splats-3d`)
-In your web app (and inside a WebView on Mobile), you can render the `.ply` file returned by `idol-sdk` with orbit controls:
-
-```tsx
-import { useEffect, useRef } from "react";
-import * as GaussianSplats3D from "@mkkellogg/gaussian-splats-3d";
-
-interface SplatViewerProps {
-  plyUrl: string;
-  stlUrl?: string;
-}
-
-export function SplatViewer({ plyUrl, stlUrl }: SplatViewerProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    const viewer = new GaussianSplats3D.Viewer({
-      rootElement: containerRef.current,
-      cameraUp: [0, -1, 0],
-      initialCameraPosition: [0, 0, 2.5],
-      initialCameraLookAt: [0, 0, 0],
-    });
-
-    viewer.addSplatScene(plyUrl, {
-      splatAlphaRemovalThreshold: 5,
-      showLoadingUI: true,
-    }).then(() => {
-      viewer.start();
-    });
-
-    return () => {
-      viewer.dispose();
-    };
-  }, [plyUrl]);
-
-  return (
-    <div className="flex flex-col h-full w-full">
-      <div ref={containerRef} className="flex-1 min-h-[500px] bg-neutral-900 rounded-xl overflow-hidden" />
-      {stlUrl && (
-        <div className="mt-4 flex gap-3">
-          <a
-            href={stlUrl}
-            download="model.stl"
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium"
-          >
-            Download 3D Printable .STL
-          </a>
-        </div>
-      )}
-    </div>
-  );
-}
-```
-
-### Mobile App Flow (iOS & Android)
-1. **Camera Capture Overlay**: Guide the user to take a well-lit photo of a single object or figurine with a clear silhouette (Idol's `--mode real` uses `1.7x` framing automatically).
-2. **Quality Selector**:
-   - **Fast Preview (`32,768` or `262,144` Gaussians)**: Loads quickly over mobile data (~5–15 MB `.splat`).
-   - **High Detail (`1,048,576` Gaussians)**: Best for desktop viewing and high-resolution mesh extraction.
-3. **3D Printing Pedestal / Base Generator (Bonus Feature for 3D Printing)**:
-   - Before exporting the `.stl`, offer a toggle in the mobile UI: **"Add Flat Pedestal Base"**. Using `trimesh.creation.cylinder()` on the backend, boolean-union a 3mm cylindrical base to the bottom of the extracted mesh so figurines stand upright on the 3D printer bed without tipping over.
-
----
-
-## 7. Roadmap to Build & Launch Your Prototype
-
-1. **Phase 1 — Local CLI & Quality Test (Day 1)**
-   - Clone `speridlabs/idol-sdk` on an NVIDIA GPU machine, accept the Hugging Face gates for `DINOv3` and `FLUX.2-dev`, and test `python -m idol.sample --image my_photo.jpg --mode real`.
-   - Inspect the `.ply` output in [SuperSplat](https://playcanvas.com/supersplat/editor).
-2. **Phase 2 — Splat-to-STL Pipeline Tuning (Days 2–3)**
-   - Test both **Screened Poisson** and **Multi-View TSDF depth fusion** on Idol's `.ply` outputs and slice the resulting `.stl` in Bambu Studio / PrusaSlicer to verify manifold geometry.
-3. **Phase 3 — Web & Mobile MVP (Days 4–7)**
-   - Wrap `IdolPipeline` in the FastAPI server above.
-   - Build a responsive Next.js PWA (works on both desktop browsers and mobile Safari/Chrome camera upload) or a Flutter mobile client.

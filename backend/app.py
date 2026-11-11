@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.pipeline_service import IdolPipelineService
+from backend.hunyuan_service import Hunyuan3DService
 from backend.mesh_converter import ply_splat_to_watertight_stl
 
 logging.basicConfig(level=logging.INFO)
@@ -49,6 +50,7 @@ if os.path.isdir(FRONTEND_DIST):
     app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIST, "assets")), name="static_assets")
 
 pipeline_service = IdolPipelineService.get_instance()
+hunyuan_service = Hunyuan3DService.get_instance()
 
 
 @app.get("/")
@@ -56,7 +58,7 @@ async def serve_index():
     index_file = os.path.join(FRONTEND_DIST, "index.html")
     if os.path.exists(index_file):
         return FileResponse(index_file)
-    return {"message": "Idol Image-to-3D API is running. Build frontend/ or visit /docs"}
+    return {"message": "Idol & Hunyuan3D Image-to-3D API is running. Build frontend/ or visit /docs"}
 
 
 @app.get("/api/v1/health")
@@ -71,26 +73,31 @@ async def health_check():
             "memory_reserved_gb": round(torch.cuda.memory_reserved(0) / (1024 ** 3), 2),
         }
     access_status = pipeline_service.check_access_status()
+    hunyuan_status = hunyuan_service.check_status()
     return {
         "status": "online",
         "cuda_available": cuda_available,
         "device": device_info,
         "pipeline_loaded": pipeline_service.is_loaded,
         "hf_status": access_status,
+        "hunyuan_status": hunyuan_status,
     }
 
 
 @app.post("/api/v1/generate-3d")
 async def generate_3d(
     file: UploadFile = File(...),
+    engine: str = Form("hunyuan"),
     mode: str = Form("real"),
     num_gaussians: int = Form(262144),
     export_stl: bool = Form(True),
     add_pedestal: bool = Form(False),
 ):
     """
-    Takes an uploaded photo, generates a 3D Gaussian Splat (.ply),
-    and converts it to a 3D-printable watertight .stl mesh.
+    Takes an uploaded photo and generates 3D outputs using the selected engine:
+    - 'hunyuan': Hunyuan3D-2mini-Turbo (0.6B) native SDF mesh (.stl) + surface splat (.ply)
+    - 'idol': Sperid Labs Idol (0.66B) 3D Gaussian Splat (.ply) + Marching Cubes (.stl)
+    - 'dual': Idol for photorealistic 3DGS (.ply) + Hunyuan3D-2mini-Turbo for native SDF (.stl)
     """
     job_id = str(uuid.uuid4())[:8]
     ext = os.path.splitext(file.filename)[1] or ".jpg"
@@ -102,35 +109,111 @@ async def generate_3d(
         content = await file.read()
         with open(input_path, "wb") as f:
             f.write(content)
-        logger.info(f"Received image for job {job_id} ({len(content)} bytes)")
+        logger.info(f"Received image for job {job_id} ({len(content)} bytes, engine={engine})")
 
-        # 1. Run 3D Gaussian Splat generation via Idol
-        logger.info(f"Running Idol inference (mode={mode}, splats={num_gaussians})...")
-        gen_info = pipeline_service.generate(
-            image_path=input_path,
-            ply_output_path=ply_path,
-            mode=mode,
-            num_gaussians=num_gaussians,
-        )
-
-        # 2. Extract watertight 3D-printable mesh
         stl_generated = False
-        if export_stl:
-            logger.info("Extracting watertight STL mesh via Marching Cubes...")
-            ply_splat_to_watertight_stl(
-                ply_path=ply_path,
-                stl_path=stl_path,
-                target_height_mm=100.0,
-                pitch=0.015,
-                add_pedestal=add_pedestal,
+        notices = []
+        active_mode = engine
+
+        if engine == "hunyuan":
+            try:
+                gen_info = hunyuan_service.generate_mesh(
+                    image_path=input_path,
+                    stl_output_path=stl_path,
+                    ply_output_path=ply_path,
+                    mode=mode,
+                    add_pedestal=add_pedestal,
+                    num_splats=num_gaussians,
+                )
+                stl_generated = True
+                active_mode = gen_info.get("mode", "neural_sdf")
+            except Exception as hy_err:
+                logger.warning(f"Hunyuan3D-2mini-Turbo unavailable ({hy_err}); falling back to Idol pipeline.")
+                notices.append(
+                    f"Hunyuan3D-2mini-Turbo not yet installed ({hy_err}). "
+                    "Install with `pip install git+https://github.com/Tencent/Hunyuan3D-2.git`. Ran Idol fallback."
+                )
+                gen_info = pipeline_service.generate(
+                    image_path=input_path,
+                    ply_output_path=ply_path,
+                    mode=mode,
+                    num_gaussians=num_gaussians,
+                )
+                if gen_info.get("notice"):
+                    notices.append(gen_info["notice"])
+                if export_stl:
+                    ply_splat_to_watertight_stl(
+                        ply_path=ply_path,
+                        stl_path=stl_path,
+                        target_height_mm=100.0,
+                        pitch=0.015,
+                        add_pedestal=add_pedestal,
+                    )
+                    stl_generated = True
+
+        elif engine == "dual":
+            # 1. Idol generates the photorealistic 3D Gaussian Splat (.ply)
+            idol_info = pipeline_service.generate(
+                image_path=input_path,
+                ply_output_path=ply_path,
+                mode=mode,
+                num_gaussians=num_gaussians,
             )
-            stl_generated = True
+            if idol_info.get("notice"):
+                notices.append(idol_info["notice"])
+
+            # 2. Hunyuan3D-2mini-Turbo generates the native watertight SDF (.stl)
+            try:
+                hunyuan_service.generate_mesh(
+                    image_path=input_path,
+                    stl_output_path=stl_path,
+                    ply_output_path=None,
+                    mode=mode,
+                    add_pedestal=add_pedestal,
+                )
+                stl_generated = True
+                active_mode = "dual_idol_hunyuan"
+            except Exception as hy_err:
+                logger.warning(f"Hunyuan3D-2mini-Turbo unavailable in dual mode ({hy_err}); using Marching Cubes STL.")
+                notices.append(f"Hunyuan3D-2mini-Turbo unavailable ({hy_err}); extracted STL via Marching Cubes.")
+                ply_splat_to_watertight_stl(
+                    ply_path=ply_path,
+                    stl_path=stl_path,
+                    target_height_mm=100.0,
+                    pitch=0.015,
+                    add_pedestal=add_pedestal,
+                )
+                stl_generated = True
+
+        else:
+            # Default 'idol' engine
+            gen_info = pipeline_service.generate(
+                image_path=input_path,
+                ply_output_path=ply_path,
+                mode=mode,
+                num_gaussians=num_gaussians,
+            )
+            active_mode = gen_info.get("mode", "neural")
+            if gen_info.get("notice"):
+                notices.append(gen_info["notice"])
+
+            if export_stl:
+                logger.info("Extracting watertight STL mesh via Marching Cubes...")
+                ply_splat_to_watertight_stl(
+                    ply_path=ply_path,
+                    stl_path=stl_path,
+                    target_height_mm=100.0,
+                    pitch=0.015,
+                    add_pedestal=add_pedestal,
+                )
+                stl_generated = True
 
         return {
             "job_id": job_id,
             "status": "success",
-            "generation_mode": gen_info.get("mode", "neural"),
-            "notice": gen_info.get("notice"),
+            "engine": engine,
+            "generation_mode": active_mode,
+            "notice": " | ".join(notices) if notices else None,
             "ply_url": f"/api/v1/download/{job_id}.ply",
             "stl_url": f"/api/v1/download/{job_id}.stl" if stl_generated else None,
             "input_preview_url": f"/api/v1/download/{job_id}_input{ext}",

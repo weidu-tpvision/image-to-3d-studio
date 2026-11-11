@@ -9,7 +9,10 @@
 
 **Idol 3D Studio** turns a single 2D photograph (from your phone, camera, or render) into a complete, photorealistic 360° **3D Gaussian Splat (`.ply`)** and a watertight, slicer-ready **3D-printable mesh (`.stl`)** in seconds.
 
-Built on top of [**`speridlabs/idol-sdk`**](https://github.com/speridlabs/idol-sdk) (0.66B Rectified-Flow 3D Diffusion Transformer), featuring an integrated **Marching Cubes + Taubin mesh extraction pipeline** and a responsive **Web & Mobile 3D viewer** with native camera capture.
+Powered by a **Dual-Engine 3D AI Architecture**:
+1. [**`Tencent/Hunyuan3D-2mini-Turbo`**](https://huggingface.co/tencent/Hunyuan3D-2mini) (**0.6B Flow-Matching SDF Transformer** with `FlashVDM`): Native watertight Signed Distance Field (SDF) mesh generation in ~2 seconds (~5.8 GB VRAM, ungated, and quantizable for standalone mobile devices like Google Pixel 9).
+2. [**`speridlabs/idol-sdk`**](https://github.com/speridlabs/idol-sdk) (**0.66B Rectified-Flow 3D Diffusion Transformer**): Photorealistic 360° 3D Gaussian Splatting paired with an integrated **opacity-filtered Marching Cubes + Taubin mesh extraction pipeline**.
+3. **Dual Engine Mode**: Runs both simultaneously on high-memory GPUs (like NVIDIA DGX Spark GB10) to deliver Idol's photorealistic `.ply` splat alongside Hunyuan3D's native CAD-sharp `.stl` mesh.
 
 ---
 
@@ -90,11 +93,14 @@ cd idol-3d-studio
 python3 -m venv .venv
 source .venv/bin/activate
 
-# Install idol-sdk
+# Install idol-sdk (for 3D Gaussian Splat engine)
 git clone https://github.com/speridlabs/idol-sdk.git
 pip install -e ./idol-sdk
 
-# Install dependencies
+# Install Tencent Hunyuan3D-2 (for Hunyuan3D-2mini-Turbo 0.6B Native SDF engine)
+pip install git+https://github.com/Tencent/Hunyuan3D-2.git
+
+# Install backend dependencies
 pip install -r backend/requirements.txt
 ```
 

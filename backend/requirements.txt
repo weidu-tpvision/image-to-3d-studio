@@ -16,6 +16,10 @@ scipy>=1.12.0
 scikit-image>=0.22.0
 numpy>=1.26.0
 Pillow>=10.0.0
+rembg>=2.0.50
+onnxruntime>=1.18.0
+einops>=0.8.0
+omegaconf>=2.3.0
 
 # API Backend
 fastapi>=0.110.0
@@ -23,5 +27,6 @@ uvicorn>=0.30.0
 python-multipart>=0.0.9
 requests>=2.31.0
 
-# Idol SDK (can also be installed via `pip install -e ./idol-sdk` or git)
-# git+https://github.com/speridlabs/idol-sdk.git
+# 3D Generation SDKs (install via git/pip on GPU host):
+# pip install -e ./idol-sdk
+# pip install git+https://github.com/Tencent/Hunyuan3D-2.git
